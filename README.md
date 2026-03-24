@@ -90,6 +90,80 @@ batch_energy = jax.vmap(model.get_energy)(batch_xyz)
 batch_energy, batch_forces = jax.vmap(model.get_energy_and_forces)(batch_xyz)
 ```
 
+### Export to ONNX
+
+JaxPIP models can be exported to ONNX for use in C++, Fortran, or other production environments.
+
+```python
+import jax
+
+jax.config.update("jax_enable_x64", True)
+
+from jax import numpy as jnp
+
+from jaxpip.descriptor import PolynomialDescriptor
+from jaxpip.model import PolynomialLinearModel, PolynomialNeuralNetwork
+
+
+model = ...
+
+
+# define whatever you want to export
+@jax.jit
+def export_fn_energy(xyz):
+    return model.get_energy(xyz)
+
+
+@jax.jit
+def export_fn_energy_and_forces(xyz):
+    return model.get_energy_and_forces(xyz)
+
+
+@jax.jit
+def export_fn_batch_energy(xyz):
+    return jax.vmap(model.get_energy)(xyz)
+
+
+@jax.jit
+def export_fn_batch_energy_and_forces(xyz):
+    return jax.vmap(model.get_energy_and_forces)(xyz)
+
+
+import jax2onnx  # NOTE: must import jax2onnx here or jax ops will be mocked
+import onnx
+
+
+# single
+onnx_model = jax2onnx.to_onnx(
+    fn=export_fn_energy,  # or export_fn_energy_and_forces
+    inputs=[
+        (N_atoms, 3),
+    ],
+    enable_double_precision=True,
+)
+
+onnx.save(onnx_model, "model.onnx")
+
+# batch
+onnx_model_batch = jax2onnx.to_onnx(
+    fn=export_fn_batch_energy,  # or export_fn_batch_energy_and_forces
+    inputs=[
+        ("B", N_atoms, 3),  # "B" for dynamic batch
+    ],
+    enable_double_precision=True,
+)
+
+onnx.save(onnx_model_batch, "model_batch.onnx")
+```
+
+After exporting, it is highly recommended to use [ONNX Simplifier](https://github.com/onnxsim/onnxsim) to optimize the computational graph:
+
+```bash
+$ onnxsim model.onnx model.sim.onnx --enable-onnxruntime-optimization
+```
+
+Also, the onnx model can be visualized in [Netron](https://netron.app).
+
 ## License
 
 BSD 2-Clause License
