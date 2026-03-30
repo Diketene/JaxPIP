@@ -1,8 +1,13 @@
+import os
+import shutil
+import tempfile
 from typing import Callable, List, Tuple, Union
 
 import equinox as eqx
 import jax
+import numpy as np
 from jax import numpy as jnp
+from orbax import checkpoint as ocp
 
 from jaxpip.descriptor import PolynomialDescriptor
 from jaxpip.model.activation import ISRU
@@ -18,15 +23,15 @@ class FeatureScaler(eqx.Module):
 
     def __init__(
         self,
-        p_min: jax.Array,
-        p_max: jax.Array,
-        V_min: jax.Array,
-        V_max: jax.Array,
+        p_min: Union[jax.Array, np.ndarray],
+        p_max: Union[jax.Array, np.ndarray],
+        V_min: Union[jax.Array, np.ndarray, float],
+        V_max: Union[jax.Array, np.ndarray, float],
     ) -> None:
-        self.p_min = p_min
-        self.p_max = p_max
-        self.V_min = V_min
-        self.V_max = V_max
+        self.p_min = jnp.asarray(p_min)
+        self.p_max = jnp.asarray(p_max)
+        self.V_min = jnp.asarray(V_min)
+        self.V_max = jnp.asarray(V_max)
 
     def rescale_p(
         self,
@@ -61,6 +66,9 @@ class PolynomialNeuralNetwork(eqx.Module):
     scaler: FeatureScaler
     dtype: jnp.dtype = eqx.field(static=True)
 
+    _hidden_layers: List[int] = eqx.field(static=True)
+    _activation_name: str = eqx.field(static=True)
+
     def __init__(
         self,
         descriptor: PolynomialDescriptor,
@@ -69,6 +77,8 @@ class PolynomialNeuralNetwork(eqx.Module):
         activation: Union[str, Callable] = "tanh",
     ) -> None:
         self.descriptor = descriptor
+        self._hidden_layers = hidden_layers
+        self._activation_name = activation if isinstance(activation, str) else "custom"
 
         # inherit descriptor's dtype
         _dtype = descriptor.dtype
@@ -174,44 +184,116 @@ class PolynomialNeuralNetwork(eqx.Module):
 
         return new_model
 
+    def save(
+        self,
+        save_path: str = "jaxpip_network.zip",
+        compress: bool = True,
+    ) -> str:
+        """Save Polynomial Neural Network to path.
+
+        Arguments:
+            save_path (str): Path to directory to store model.
+                Defaults to "jaxpip_network.zip".
+            compress (bool): Whether to compress.
+                Defaults to True.
+
+        Returns:
+            save_path (str): Absolute path to saved directory.
+        """
+        save_path = os.path.abspath(save_path)
+        checkpointer = ocp.PyTreeCheckpointer()
+
+        dynamic_model, _ = eqx.partition(self, eqx.is_array)
+
+        state = {
+            "config": {
+                "hidden_layers": self._hidden_layers,
+                "activation": self._activation_name,
+                "alpha": float(self.descriptor.alpha),
+            },
+            "weights": dynamic_model,
+        }
+
+        if compress or save_path.endswith(".zip"):
+            with tempfile.TemporaryDirectory() as tmpdir:
+                # save weights
+                orbax_dir = os.path.join(tmpdir, "model_files")
+                checkpointer.save(orbax_dir, state, force=True)
+
+                # archive
+                base_name = save_path[:-4] if save_path.endswith(".zip") else save_path
+                shutil.make_archive(base_name, "zip", orbax_dir)
+
+                return f"{base_name}.zip"
+        else:
+            checkpointer.save(save_path, state, force=True)
+
+        return save_path
+
     @classmethod
     def from_file(
         cls,
         basis_file: str,
-        alpha: float,
-        hidden_layers: List[int],
-        weights_file: str,
-        activation: Union[str, Callable] = "tanh",
+        save_path: str,
     ) -> "PolynomialNeuralNetwork":
         """Initialize Polynomial Neural Network from file.
 
         Arguments:
-            basis_file (str): Path to JaxPIP basis file (json or json.gz)
-            alpha (float): Morse range parameter
-            hidden_layers (List[int]): Number of units in each layer.
-            weights_file (str): Path to Polynomial Neural Network weights.
-            activation (Union[str, Callable]): Type of activation function.
+            basis_file (str): Path to basis file (json or json.gz)
+            save_path (str): Path to saved path
 
         Returns:
             Polynomial Neural Network
         """
-        # 1. descriptor
+        save_path = os.path.abspath(save_path)
+        checkpointer = ocp.PyTreeCheckpointer()
+
+        if save_path.endswith(".zip") or os.path.isfile(save_path):
+            with tempfile.TemporaryDirectory() as tmpdir:
+                shutil.unpack_archive(save_path, tmpdir, "zip")
+
+                return cls._load_from_orbax(basis_file, tmpdir, checkpointer)
+        else:
+            return cls._load_from_orbax(basis_file, save_path, checkpointer)
+
+    @classmethod
+    def _load_from_orbax(
+        cls,
+        basis_file: str,
+        save_path: str,
+        checkpointer: ocp.PyTreeCheckpointer,
+    ) -> "PolynomialNeuralNetwork":
+        raw_state = checkpointer.restore(save_path)
+        config = raw_state["config"]
+
+        # 1. skeleton
         descriptor = PolynomialDescriptor.from_file(
             basis_file=basis_file,
-            alpha=alpha,
+            alpha=config["alpha"],
             dtype=jnp.float64,
         )
 
-        # 2. model skeleton
-        model = cls(
+        skeleton = cls(
             descriptor=descriptor,
-            hidden_layers=hidden_layers,
-            key=jnp.random.PRNGKey(0),
-            activation=activation,
+            hidden_layers=config["hidden_layers"],
+            key=jax.random.PRNGKey(0),
+            activation=config["activation"],
         )
 
-        # 3. load weights
-        model = eqx.tree_deserialise_nodes(weights_file, model)
+        # 2. split dynamic & static
+        skeleton_dynamic, skeleton_static = eqx.partition(skeleton, eqx.is_array)
+
+        # 3. load dynamic
+        model_dynamic = checkpointer.restore(
+            save_path,
+            item={
+                "config": config,
+                "weights": skeleton_dynamic,
+            },
+        )["weights"]
+
+        # 4. merge
+        model = eqx.combine(model_dynamic, skeleton_static)
 
         return model
 
