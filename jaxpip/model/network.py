@@ -174,6 +174,47 @@ class PolynomialNeuralNetwork(eqx.Module):
 
         return new_model
 
+    @classmethod
+    def from_file(
+        cls,
+        basis_file: str,
+        alpha: float,
+        hidden_layers: List[int],
+        weights_file: str,
+        activation: Union[str, Callable] = "tanh",
+    ) -> "PolynomialNeuralNetwork":
+        """Initialize Polynomial Neural Network from file.
+
+        Arguments:
+            basis_file (str): Path to JaxPIP basis file (json or json.gz)
+            alpha (float): Morse range parameter
+            hidden_layers (List[int]): Number of units in each layer.
+            weights_file (str): Path to Polynomial Neural Network weights.
+            activation (Union[str, Callable]): Type of activation function.
+
+        Returns:
+            Polynomial Neural Network
+        """
+        # 1. descriptor
+        descriptor = PolynomialDescriptor.from_file(
+            basis_file=basis_file,
+            alpha=alpha,
+            dtype=jnp.float64,
+        )
+
+        # 2. model skeleton
+        model = cls(
+            descriptor=descriptor,
+            hidden_layers=hidden_layers,
+            key=jnp.random.PRNGKey(0),
+            activation=activation,
+        )
+
+        # 3. load weights
+        model = eqx.tree_deserialise_nodes(weights_file, model)
+
+        return model
+
     def get_energy(
         self,
         xyz: jax.Array,
