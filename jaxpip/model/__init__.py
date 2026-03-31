@@ -4,6 +4,7 @@ from .network import FeatureScaler, PolynomialNeuralNetwork
 
 __all__ = [
     "ISRU",
+    "FeatureScaler",
     "PolynomialLinearModel",
     "PolynomialNeuralNetwork",
 ]

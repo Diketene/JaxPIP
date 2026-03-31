@@ -1,13 +1,11 @@
+import json
 import os
-import shutil
-import tempfile
 from typing import List, Literal, Tuple, Union
 
 import equinox as eqx
 import jax
 import numpy as np
 from jax import numpy as jnp
-from orbax import checkpoint as ocp
 
 from jaxpip.descriptor import PolynomialDescriptor
 from jaxpip.model.activation import ISRU
@@ -186,51 +184,28 @@ class PolynomialNeuralNetwork(eqx.Module):
 
     def save(
         self,
-        network_path: str = "jaxpip_network.zip",
-        compress: bool = True,
+        network_path: str = "jaxpip_network.eqx",
     ) -> str:
         """Save Polynomial Neural Network to path.
 
         Arguments:
             network_path (str): Path to directory to store model.
-                Defaults to "jaxpip_network.zip".
-            compress (bool): Whether to compress.
-                Defaults to True.
+                Defaults to "jaxpip_network.eqx".
 
         Returns:
             network_path (str): Absolute path to saved network.
         """
         network_path = os.path.abspath(network_path)
-        checkpointer = ocp.PyTreeCheckpointer()
 
-        dynamic_model, _ = eqx.partition(self, eqx.is_array)
-
-        state = {
-            "config": {
-                "hidden_layers": self._hidden_layers,
-                "activation": self._activation_name,
-                "alpha": float(self.descriptor.alpha),
-            },
-            "weights": dynamic_model,
+        hyperparams = {
+            "alpha": float(self.descriptor.alpha),
+            "hidden_layers": self._hidden_layers,
+            "activation": self._activation_name,
         }
 
-        if compress or network_path.endswith(".zip"):
-            with tempfile.TemporaryDirectory() as tmpdir:
-                # save weights
-                orbax_dir = os.path.join(tmpdir, "model_files")
-                checkpointer.save(orbax_dir, state, force=True)
-
-                # archive
-                if network_path.endswith(".zip"):
-                    base_name = network_path[:-4]
-                else:
-                    base_name = network_path
-
-                shutil.make_archive(base_name, "zip", orbax_dir)
-
-                return f"{base_name}.zip"
-        else:
-            checkpointer.save(network_path, state, force=True)
+        with open(network_path, "wb") as f:
+            f.write((json.dumps(hyperparams) + "\n").encode("utf-8"))
+            eqx.tree_serialise_leaves(f, self)
 
         return network_path
 
@@ -249,55 +224,26 @@ class PolynomialNeuralNetwork(eqx.Module):
         Returns:
             Polynomial Neural Network
         """
+        basis_file = os.path.abspath(basis_file)
         network_path = os.path.abspath(network_path)
-        checkpointer = ocp.PyTreeCheckpointer()
 
-        if network_path.endswith(".zip") or os.path.isfile(network_path):
-            with tempfile.TemporaryDirectory() as tmpdir:
-                shutil.unpack_archive(network_path, tmpdir, "zip")
+        with open(network_path, "rb") as f:
+            hyperparams = json.loads(f.readline().decode("utf-8"))
 
-                return cls._load_from_orbax(basis_file, tmpdir, checkpointer)
-        else:
-            return cls._load_from_orbax(basis_file, network_path, checkpointer)
+            descriptor = PolynomialDescriptor.from_file(
+                basis_file=basis_file,
+                alpha=hyperparams["alpha"],
+                dtype=jnp.float64,
+            )
 
-    @classmethod
-    def _load_from_orbax(
-        cls,
-        basis_file: str,
-        network_path: str,
-        checkpointer: ocp.PyTreeCheckpointer,
-    ) -> "PolynomialNeuralNetwork":
-        raw_state = checkpointer.restore(network_path)
-        config = raw_state["config"]
+            skeleton = cls(
+                descriptor=descriptor,
+                hidden_layers=hyperparams["hidden_layers"],
+                key=jax.random.PRNGKey(0),
+                activation=hyperparams["activation"],
+            )
 
-        # 1. skeleton
-        descriptor = PolynomialDescriptor.from_file(
-            basis_file=basis_file,
-            alpha=config["alpha"],
-            dtype=jnp.float64,
-        )
-
-        skeleton = cls(
-            descriptor=descriptor,
-            hidden_layers=config["hidden_layers"],
-            key=jax.random.PRNGKey(0),
-            activation=config["activation"],
-        )
-
-        # 2. split dynamic & static
-        skeleton_dynamic, skeleton_static = eqx.partition(skeleton, eqx.is_array)
-
-        # 3. load dynamic
-        model_dynamic = checkpointer.restore(
-            network_path,
-            item={
-                "config": config,
-                "weights": skeleton_dynamic,
-            },
-        )["weights"]
-
-        # 4. merge
-        model = eqx.combine(model_dynamic, skeleton_static)
+            model = eqx.tree_deserialise_leaves(f, skeleton)
 
         return model
 
