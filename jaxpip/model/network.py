@@ -184,18 +184,18 @@ class PolynomialNeuralNetwork(eqx.Module):
 
     def save(
         self,
-        network_path: str = "jaxpip_network.eqx",
+        network_file: str = "jaxpip_network.eqx",
     ) -> str:
         """Save Polynomial Neural Network to path.
 
         Arguments:
-            network_path (str): Path to directory to store model.
+            network_file (str): Path to directory to store model.
                 Defaults to "jaxpip_network.eqx".
 
         Returns:
-            network_path (str): Absolute path to saved network.
+            network_file (str): Absolute path to saved network.
         """
-        network_path = os.path.abspath(network_path)
+        network_file = os.path.abspath(network_file)
 
         hyperparams = {
             "alpha": float(self.descriptor.alpha),
@@ -203,31 +203,31 @@ class PolynomialNeuralNetwork(eqx.Module):
             "activation": self._activation_name,
         }
 
-        with open(network_path, "wb") as f:
+        with open(network_file, "wb") as f:
             f.write((json.dumps(hyperparams) + "\n").encode("utf-8"))
             eqx.tree_serialise_leaves(f, self)
 
-        return network_path
+        return network_file
 
     @classmethod
     def from_file(
         cls,
         basis_file: str,
-        network_path: str,
+        network_file: str,
     ) -> "PolynomialNeuralNetwork":
         """Initialize Polynomial Neural Network from file.
 
         Arguments:
             basis_file (str): Path to basis file (json or json.gz)
-            network_path (str): Path to saved network.
+            network_file (str): Path to saved network (eqx).
 
         Returns:
             Polynomial Neural Network
         """
         basis_file = os.path.abspath(basis_file)
-        network_path = os.path.abspath(network_path)
+        network_file = os.path.abspath(network_file)
 
-        with open(network_path, "rb") as f:
+        with open(network_file, "rb") as f:
             hyperparams = json.loads(f.readline().decode("utf-8"))
 
             descriptor = PolynomialDescriptor.from_file(
