@@ -1,7 +1,7 @@
 import os
 import shutil
 import tempfile
-from typing import Callable, List, Tuple, Union
+from typing import List, Literal, Tuple, Union
 
 import equinox as eqx
 import jax
@@ -74,7 +74,7 @@ class PolynomialNeuralNetwork(eqx.Module):
         descriptor: PolynomialDescriptor,
         hidden_layers: List[int],
         key: jax.Array,
-        activation: Union[str, Callable] = "tanh",
+        activation: Literal["tanh", "isru"] = "tanh",
     ) -> None:
         self.descriptor = descriptor
         self._hidden_layers = hidden_layers
@@ -186,21 +186,21 @@ class PolynomialNeuralNetwork(eqx.Module):
 
     def save(
         self,
-        save_path: str = "jaxpip_network.zip",
+        network_path: str = "jaxpip_network.zip",
         compress: bool = True,
     ) -> str:
         """Save Polynomial Neural Network to path.
 
         Arguments:
-            save_path (str): Path to directory to store model.
+            network_path (str): Path to directory to store model.
                 Defaults to "jaxpip_network.zip".
             compress (bool): Whether to compress.
                 Defaults to True.
 
         Returns:
-            save_path (str): Absolute path to saved directory.
+            network_path (str): Absolute path to saved network.
         """
-        save_path = os.path.abspath(save_path)
+        network_path = os.path.abspath(network_path)
         checkpointer = ocp.PyTreeCheckpointer()
 
         dynamic_model, _ = eqx.partition(self, eqx.is_array)
@@ -214,56 +214,60 @@ class PolynomialNeuralNetwork(eqx.Module):
             "weights": dynamic_model,
         }
 
-        if compress or save_path.endswith(".zip"):
+        if compress or network_path.endswith(".zip"):
             with tempfile.TemporaryDirectory() as tmpdir:
                 # save weights
                 orbax_dir = os.path.join(tmpdir, "model_files")
                 checkpointer.save(orbax_dir, state, force=True)
 
                 # archive
-                base_name = save_path[:-4] if save_path.endswith(".zip") else save_path
+                if network_path.endswith(".zip"):
+                    base_name = network_path[:-4]
+                else:
+                    base_name = network_path
+
                 shutil.make_archive(base_name, "zip", orbax_dir)
 
                 return f"{base_name}.zip"
         else:
-            checkpointer.save(save_path, state, force=True)
+            checkpointer.save(network_path, state, force=True)
 
-        return save_path
+        return network_path
 
     @classmethod
     def from_file(
         cls,
         basis_file: str,
-        save_path: str,
+        network_path: str,
     ) -> "PolynomialNeuralNetwork":
         """Initialize Polynomial Neural Network from file.
 
         Arguments:
             basis_file (str): Path to basis file (json or json.gz)
-            save_path (str): Path to saved path
+            network_path (str): Path to saved network.
 
         Returns:
             Polynomial Neural Network
         """
-        save_path = os.path.abspath(save_path)
+        network_path = os.path.abspath(network_path)
         checkpointer = ocp.PyTreeCheckpointer()
 
-        if save_path.endswith(".zip") or os.path.isfile(save_path):
+        if network_path.endswith(".zip") or os.path.isfile(network_path):
             with tempfile.TemporaryDirectory() as tmpdir:
-                shutil.unpack_archive(save_path, tmpdir, "zip")
+                shutil.unpack_archive(network_path, tmpdir, "zip")
 
                 return cls._load_from_orbax(basis_file, tmpdir, checkpointer)
         else:
-            return cls._load_from_orbax(basis_file, save_path, checkpointer)
+            return cls._load_from_orbax(basis_file, network_path, checkpointer)
 
     @classmethod
     def _load_from_orbax(
         cls,
         basis_file: str,
-        save_path: str,
+        network_path: str,
         checkpointer: ocp.PyTreeCheckpointer,
     ) -> "PolynomialNeuralNetwork":
-        raw_state = checkpointer.restore(save_path)
+        raw_state = checkpointer.restore(network_path)
         config = raw_state["config"]
 
         # 1. skeleton
@@ -285,7 +289,7 @@ class PolynomialNeuralNetwork(eqx.Module):
 
         # 3. load dynamic
         model_dynamic = checkpointer.restore(
-            save_path,
+            network_path,
             item={
                 "config": config,
                 "weights": skeleton_dynamic,
