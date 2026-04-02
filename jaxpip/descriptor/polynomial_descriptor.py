@@ -1,5 +1,5 @@
 import warnings
-from typing import Any
+from typing import Any, Literal
 
 import jax
 from jax import numpy as jnp
@@ -13,13 +13,16 @@ class PolynomialDescriptor:
         self,
         basis_set: InvariantBasis,
         alpha: float = 1.0,
+        decay_kernel: Literal["morse", "reciprocal"] = "morse",
         dtype: Any = jnp.float64,
     ) -> None:
         """
         Arguments:
             basis_set (InvariantBasis): Permutation invariant basis set.
-            alpha (float): Range parameter for Morse-like transformation.
+            alpha (float): Range parameter for distance mapping kernel.
                 Defaults to 1.0.
+            decay_kernel (Literal["morse", "reciprocal"]): Internuclear
+                distances decay kernel. Defaults to "morse".
             dtype (Any): Floating point precision (jnp.float64 or jnp.float32).
                 Defaults jnp.float64.
         """
@@ -35,7 +38,15 @@ class PolynomialDescriptor:
             )
 
         self.dtype = dtype
+
+        # alpha range parameter
         self.alpha = alpha
+        self.ln_alpha = jnp.log(alpha)  # for reciprocal
+
+        # decay kernel, morse or reciprocal
+        self.decay_kernel = decay_kernel
+
+        # pip/fi basis
         self.basis_info = get_basis_info(basis_set)
 
         exponents, segments = flatten_basis(basis_set)
@@ -72,7 +83,12 @@ class PolynomialDescriptor:
         )
 
         # 2. log-exp fusion
-        flat_monos = jnp.exp(jnp.dot(self.basis_matrix, -r / self.alpha))
+        if self.decay_kernel == "morse":
+            ln_y = -r / self.alpha
+        elif self.decay_kernel == "reciprocal":
+            ln_y = self.ln_alpha - jnp.log(r)
+
+        flat_monos = jnp.exp(jnp.dot(self.basis_matrix, ln_y))
 
         # 3. segment sum
         p = jax.ops.segment_sum(
@@ -96,6 +112,7 @@ class PolynomialDescriptor:
     def from_file(
         cls,
         basis_file: str,
+        decay_kernel: Literal["morse", "reciprocal"] = "morse",
         alpha: float = 1.0,
         dtype: Any = jnp.float64,
     ) -> "PolynomialDescriptor":
@@ -105,6 +122,8 @@ class PolynomialDescriptor:
             basis_file (str): Path to basis set file (json or json.gz).
             alpha (float): Range parameter for Morse-like transformation.
                 Defaults to 1.0.
+            decay_kernel (Literal["morse", "reciprocal"]): Internuclear
+                distances decay kernel. Defaults to "morse".
             dtype (Any): Precision, jnp.float64 or jnp.float32.
                 Defaults jnp.float64.
 
@@ -116,7 +135,12 @@ class PolynomialDescriptor:
         except Exception as e:
             raise RuntimeError(f"Failed to load basis file: {e}")
 
-        descriptor = cls(basis_set, alpha, dtype)
+        descriptor = cls(
+            basis_set=basis_set,
+            alpha=alpha,
+            decay_kernel=decay_kernel,
+            dtype=dtype,
+        )
 
         return descriptor
 
