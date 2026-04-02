@@ -184,18 +184,18 @@ class PolynomialNeuralNetwork(eqx.Module):
 
     def save(
         self,
-        network_file: str = "jaxpip_network.eqx",
+        model_file: str = "jaxpip_network.eqx",
     ) -> str:
         """Save Polynomial Neural Network to path.
 
         Arguments:
-            network_file (str): Path to directory to store model.
+            model_file (str): Path to directory to store model.
                 Defaults to "jaxpip_network.eqx".
 
         Returns:
-            network_file (str): Absolute path to saved network.
+            model_file (str): Absolute path to saved model.
         """
-        network_file = os.path.abspath(network_file)
+        model_file = os.path.abspath(model_file)
 
         hyperparams = {
             "alpha": float(self.descriptor.alpha),
@@ -203,31 +203,31 @@ class PolynomialNeuralNetwork(eqx.Module):
             "activation": self._activation_name,
         }
 
-        with open(network_file, "wb") as f:
+        with open(model_file, "wb") as f:
             f.write((json.dumps(hyperparams) + "\n").encode("utf-8"))
             eqx.tree_serialise_leaves(f, self)
 
-        return network_file
+        return model_file
 
     @classmethod
     def from_file(
         cls,
         basis_file: str,
-        network_file: str,
+        model_file: str,
     ) -> "PolynomialNeuralNetwork":
         """Initialize Polynomial Neural Network from file.
 
         Arguments:
             basis_file (str): Path to basis file (json or json.gz)
-            network_file (str): Path to saved network (eqx).
+            model_file (str): Path to saved model (eqx).
 
         Returns:
             Polynomial Neural Network
         """
         basis_file = os.path.abspath(basis_file)
-        network_file = os.path.abspath(network_file)
+        model_file = os.path.abspath(model_file)
 
-        with open(network_file, "rb") as f:
+        with open(model_file, "rb") as f:
             hyperparams = json.loads(f.readline().decode("utf-8"))
 
             descriptor = PolynomialDescriptor.from_file(
@@ -239,7 +239,7 @@ class PolynomialNeuralNetwork(eqx.Module):
             skeleton = cls(
                 descriptor=descriptor,
                 hidden_layers=hyperparams["hidden_layers"],
-                key=jax.random.PRNGKey(0),
+                key=jax.random.PRNGKey(114514),
                 activation=hyperparams["activation"],
             )
 

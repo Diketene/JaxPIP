@@ -1,3 +1,5 @@
+import json
+import os
 from typing import Optional, Tuple
 
 import equinox as eqx
@@ -46,6 +48,66 @@ class PolynomialLinearModel(eqx.Module):
         _new_coeffs = jnp.asarray(new_coeffs, dtype=self.dtype)
 
         return eqx.tree_at(lambda model: model.coeffs, self, _new_coeffs)
+
+    def save(
+        self,
+        model_file: str = "jaxpip_linear.eqx",
+    ) -> str:
+        """Save Polynomial Linear Model to path.
+
+        Arguments:
+            model_file (str): Path to directory to store model.
+                Defaults to "jaxpip_linear.eqx".
+
+        Returns:
+            model_file (str): Absolute path to saved model.
+        """
+        model_file = os.path.abspath(model_file)
+
+        hyperparams = {
+            "alpha": float(self.descriptor.alpha),
+        }
+
+        with open(model_file, "wb") as f:
+            f.write((json.dumps(hyperparams) + "\n").encode("utf-8"))
+            eqx.tree_serialise_leaves(f, self)
+
+        return model_file
+
+    @classmethod
+    def from_file(
+        cls,
+        basis_file: str,
+        model_file: str,
+    ) -> "PolynomialLinearModel":
+        """Initialize Polynomial Linear Model from file.
+
+        Arguments:
+            basis_file (str): Path to basis file (json or json.gz)
+            model_file (str): Path to saved model (eqx).
+
+        Returns:
+            Polynomial Linear Model
+        """
+        basis_file = os.path.abspath(basis_file)
+        model_file = os.path.abspath(model_file)
+
+        with open(model_file, "rb") as f:
+            hyperparams = json.loads(f.readline().decode("utf-8"))
+
+            descriptor = PolynomialDescriptor.from_file(
+                basis_file=basis_file,
+                alpha=hyperparams["alpha"],
+                dtype=jnp.float64,
+            )
+
+            skeleton = cls(
+                descriptor=descriptor,
+            )
+
+            model = eqx.tree_deserialise_leaves(f, skeleton)
+
+        return model
 
     def get_energy(
         self,
