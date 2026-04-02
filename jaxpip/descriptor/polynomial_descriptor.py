@@ -19,12 +19,13 @@ class PolynomialDescriptor:
         """
         Arguments:
             basis_set (InvariantBasis): Permutation invariant basis set.
-            alpha (float): Range parameter for distance mapping kernel.
+            alpha (float): Range parameter for the distance decay kernel.
                 Defaults to 1.0.
-            decay_kernel (Literal["morse", "reciprocal"]): Internuclear
-                distances decay kernel. Defaults to "morse".
+            decay_kernel (Literal["morse", "reciprocal"]): Choice of kernel 
+                for internuclear distance decay.
+                Defaults to "morse".
             dtype (Any): Floating point precision (jnp.float64 or jnp.float32).
-                Defaults jnp.float64.
+                Defaults to jnp.float64.
         """
         # 1. precision setup
         if dtype == jnp.float64 and not jax.config.read("jax_enable_x64"):
