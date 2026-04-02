@@ -198,7 +198,11 @@ class PolynomialNeuralNetwork(eqx.Module):
         model_file = os.path.abspath(model_file)
 
         hyperparams = {
+            # descriptor
             "alpha": float(self.descriptor.alpha),
+            "decay_kernel": self.descriptor.decay_kernel,
+            "dtype": str(self.dtype),
+            # network
             "hidden_layers": self._hidden_layers,
             "activation": self._activation_name,
         }
@@ -232,8 +236,9 @@ class PolynomialNeuralNetwork(eqx.Module):
 
             descriptor = PolynomialDescriptor.from_file(
                 basis_file=basis_file,
-                alpha=hyperparams["alpha"],
-                dtype=jnp.float64,
+                alpha=hyperparams.get("alpha", 1.0),
+                decay_kernel=hyperparams.get("decay_kernel", "morse"),
+                dtype=jnp.dtype(hyperparams.get("dtype", "float64")),
             )
 
             skeleton = cls(
