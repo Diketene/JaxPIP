@@ -67,7 +67,7 @@ class PolynomialLinearModel(eqx.Module):
         hyperparams = {
             "alpha": float(self.descriptor.alpha),
             "decay_kernel": self.descriptor.decay_kernel,
-            "dtype": str(self.dtype),
+            "dtype": jnp.dtype(self.dtype).name,
         }
 
         with open(model_file, "wb") as f:

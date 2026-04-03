@@ -201,7 +201,7 @@ class PolynomialNeuralNetwork(eqx.Module):
             # descriptor
             "alpha": float(self.descriptor.alpha),
             "decay_kernel": self.descriptor.decay_kernel,
-            "dtype": str(self.dtype),
+            "dtype": jnp.dtype(self.dtype).name,
             # network
             "hidden_layers": self._hidden_layers,
             "activation": self._activation_name,
