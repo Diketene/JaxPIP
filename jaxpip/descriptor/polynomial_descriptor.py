@@ -1,11 +1,15 @@
 import warnings
-from typing import Any, Literal
+from typing import Any, Callable, Dict, Literal
 
 import jax
 from jax import numpy as jnp
 
 from jaxpip.basis import flatten_basis, get_basis_info, load_basis
 from jaxpip.types import InvariantBasis
+
+from .kernel import kernel_morse, kernel_reciprocal
+
+KernelFn = Callable[[jax.Array], jax.Array]
 
 
 class PolynomialDescriptor:
@@ -21,7 +25,7 @@ class PolynomialDescriptor:
             basis_set (InvariantBasis): Permutation invariant basis set.
             alpha (float): Range parameter for the distance decay kernel.
                 Defaults to 1.0.
-            decay_kernel (Literal["morse", "reciprocal"]): Choice of kernel 
+            decay_kernel (Literal["morse", "reciprocal"]): Choice of kernel
                 for internuclear distance decay.
                 Defaults to "morse".
             dtype (Any): Floating point precision (jnp.float64 or jnp.float32).
@@ -42,7 +46,6 @@ class PolynomialDescriptor:
 
         # alpha range parameter
         self.alpha = alpha
-        self.ln_alpha = jnp.log(alpha)  # for reciprocal
 
         # decay kernel, morse or reciprocal
         self.decay_kernel = decay_kernel
@@ -64,6 +67,21 @@ class PolynomialDescriptor:
             k=1,
         )
 
+        _kernel_map: Dict[str, KernelFn] = {
+            "morse": lambda r: kernel_morse(
+                basis_matrix=self.basis_matrix,
+                r=r,
+                alpha=alpha,
+            ),
+            "reciprocal": lambda r: kernel_reciprocal(
+                basis_matrix=self.basis_matrix,
+                r=r,
+                ln_alpha=jnp.log(alpha),
+            ),
+        }
+
+        self._kernel = _kernel_map[self.decay_kernel]
+
     def __call__(
         self,
         xyz: jax.Array,
@@ -83,13 +101,8 @@ class PolynomialDescriptor:
             axis=-1,
         )
 
-        # 2. log-exp fusion
-        if self.decay_kernel == "morse":
-            ln_y = -r / self.alpha
-        elif self.decay_kernel == "reciprocal":
-            ln_y = self.ln_alpha - jnp.log(r)
-
-        flat_monos = jnp.exp(jnp.dot(self.basis_matrix, ln_y))
+        # 2. log-exp fusion kernel
+        flat_monos = self._kernel(r)
 
         # 3. segment sum
         p = jax.ops.segment_sum(
@@ -103,7 +116,13 @@ class PolynomialDescriptor:
         return p
 
     def __repr__(self):
-        return f"PolynomialDescriptor(info={self.basis_info})"
+        return (
+            f"PolynomialDescriptor(\n"
+            f"    info={self.basis_info},\n"
+            f"    alpha={self.alpha},\n"
+            f"    decay_kernel={self.decay_kernel},\n"
+            f")"
+        )
 
     @property
     def feature_dim(self):
